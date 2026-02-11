@@ -218,11 +218,14 @@ def train(
     watch: bool = False,
     watch_interval: int = 1,
     watch_fps: int = 12,
+    plot: bool = False,
+    plot_interval: int = 50,
 ):
     rng = random.Random(42)
     agent = DQNAgent(state_size=STATE_SIZE)
     scores = []
     scores_window = deque(maxlen=100)
+    losses = []
 
     screen = None
     clock = None
@@ -254,7 +257,9 @@ def train(
 
             next_features = state_to_features(next_state)
             agent.buffer.push(features, action, reward, next_features, not next_state.alive)
-            agent.train_step()
+            loss = agent.train_step()
+            if loss is not None:
+                losses.append(loss)
             agent.decay_epsilon()
 
             features = next_features
@@ -284,6 +289,37 @@ def train(
         scores.append(state.score)
         scores_window.append(state.score)
 
+        if plot and (ep + 1) % plot_interval == 0:
+            import matplotlib.pyplot as plt
+            if ep == 0 or (ep + 1) == plot_interval:
+                plt.ion()
+                fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
+                fig.suptitle("Neural Network Learning", fontsize=12)
+            ax1.clear()
+            window = min(200, len(scores))
+            ax1.plot(scores[-window:], alpha=0.4, color="steelblue", label="Score")
+            if len(scores) >= 100:
+                rolling = np.convolve(scores, np.ones(100) / 100, mode="valid")
+                ax1.plot(range(99, len(scores)), rolling, color="darkblue", linewidth=2, label="Avg (100)")
+            ax1.set_ylabel("Score")
+            ax1.set_title("Score per episode")
+            ax1.legend(loc="lower right")
+            ax1.grid(True, alpha=0.3)
+            if losses:
+                ax2.clear()
+                loss_window = min(500, len(losses))
+                ax2.plot(losses[-loss_window:], alpha=0.5, color="coral", label="Loss")
+                if len(losses) >= 50:
+                    loss_rolling = np.convolve(losses, np.ones(50) / 50, mode="valid")
+                    ax2.plot(range(49, len(losses)), loss_rolling, color="darkred", linewidth=2, label="Avg (50)")
+                ax2.set_ylabel("Loss")
+                ax2.set_xlabel("Step")
+                ax2.set_title("DQN training loss")
+                ax2.legend(loc="upper right")
+                ax2.grid(True, alpha=0.3)
+            plt.tight_layout()
+            plt.pause(0.001)
+
         if (ep + 1) % 100 == 0:
             avg = np.mean(scores_window)
             print(f"Episode {ep + 1}/{num_episodes} | Avg score (last 100): {avg:.1f} | Epsilon: {agent.epsilon:.3f}")
@@ -291,6 +327,11 @@ def train(
     if screen is not None:
         import pygame
         pygame.quit()
+
+    if plot:
+        import matplotlib.pyplot as plt
+        plt.ioff()
+        plt.show()
 
     torch.save(agent.policy_net.state_dict(), save_path)
     print(f"Saved model to {save_path}")
@@ -366,6 +407,8 @@ if __name__ == "__main__":
     parser.add_argument("--watch", action="store_true", help="Show game window during training")
     parser.add_argument("--watch-interval", type=int, default=1, help="Render every N episodes (default 1)")
     parser.add_argument("--watch-fps", type=int, default=12, help="FPS when watching (default 12)")
+    parser.add_argument("--plot", action="store_true", help="Show live learning curve (score & loss)")
+    parser.add_argument("--plot-interval", type=int, default=50, help="Update plot every N episodes")
     args = parser.parse_args()
 
     if args.play:
@@ -377,4 +420,6 @@ if __name__ == "__main__":
             watch=args.watch,
             watch_interval=args.watch_interval,
             watch_fps=args.watch_fps,
+            plot=args.plot,
+            plot_interval=args.plot_interval,
         )
